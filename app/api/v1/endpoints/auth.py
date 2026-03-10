@@ -1,13 +1,10 @@
 """
 SentinelStream - Authentication Endpoints
-POST /auth/register  - Create a new user account
-POST /auth/login     - Obtain JWT access + refresh tokens
-POST /auth/refresh   - Exchange refresh token for new access token
-GET  /auth/me        - Get current authenticated user profile
 """
 
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -44,10 +41,6 @@ async def register(
     request: UserRegisterRequest,
     db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
-    """
-    Create a new user account with hashed password.
-    Automatically provisions a default checking account.
-    """
     # Check for duplicate email
     result = await db.execute(
         select(User).where(User.email == request.email.lower())
@@ -58,8 +51,10 @@ async def register(
             detail="An account with this email already exists",
         )
 
+    # Create user
+    user_id = uuid.uuid4()
     user = User(
-        id=uuid.uuid4(),
+        id=user_id,
         email=request.email.lower(),
         hashed_password=get_password_hash(request.password),
         full_name=request.full_name,
@@ -70,20 +65,21 @@ async def register(
         is_verified=False,
     )
     db.add(user)
-    await db.flush()  # Get the user.id before creating the account
+    await db.flush()
 
-    # Auto-provision a checking account
-    account_number = f"SS{str(user.id).replace('-', '')[:16].upper()}"
+    # Auto-provision a checking account with $10,000 seed balance
+    account_number = f"SS{str(user_id).replace('-', '')[:16].upper()}"
     account = Account(
         id=uuid.uuid4(),
-        user_id=user.id,
+        user_id=user_id,
         account_number=account_number,
         account_type="checking",
-        balance=10_000.00,  # Demo seed balance
+        balance=Decimal("10000.00"),
         currency="USD",
         is_active=True,
     )
     db.add(account)
+    await db.flush()
     await db.commit()
     await db.refresh(user)
 
@@ -99,10 +95,6 @@ async def login(
     request: UserLoginRequest,
     db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
-    """
-    Validate credentials and return an access token + refresh token.
-    The access token expires after `ACCESS_TOKEN_EXPIRE_MINUTES`.
-    """
     result = await db.execute(
         select(User).where(User.email == request.email.lower(), User.is_active == True)
     )
@@ -115,7 +107,6 @@ async def login(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Update last login timestamp
     user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
 
@@ -136,9 +127,6 @@ async def refresh_token(
     refresh_token: str,
     db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
-    """
-    Exchange a valid refresh token for a new access token pair.
-    """
     user_id = verify_token(refresh_token)
     if not user_id:
         raise HTTPException(
@@ -172,5 +160,4 @@ async def refresh_token(
 async def get_me(
     current_user: User = Depends(get_current_active_user),
 ) -> UserResponse:
-    """Return the authenticated user's profile."""
     return UserResponse.model_validate(current_user)

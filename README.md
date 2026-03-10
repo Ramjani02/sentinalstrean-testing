@@ -1,6 +1,6 @@
 # 🛡️ SentinelStream
 ### High-Throughput Real-Time Fraud Detection Engine
-*Zaalima Development | Python Elite Track — Q4 Project 1*
+*Zaalima Development | Python Project 1*
 
 ---
 
